@@ -13,15 +13,15 @@ library Shared {
     
     struct Request {
         address doctor; // Requester
-        uint requestTime; // Time of receiving a request
-        uint minOracleCount;
-        uint maxOracleCount;
+        uint256 requestTime; // Time of receiving a request
+        uint8 minOracleCount;
+        uint8 maxOracleCount;
         
         bool grant; // Decision of patient to consent or not
         
         bool oraclesEvaluated;
         address[] oracleAddresses;
-        mapping (address => uint) oracleRatings;
+        mapping (address => uint16) oracleRatings;
     }
     
     struct Patient {
@@ -30,16 +30,26 @@ library Shared {
     
     struct Doctor {
         bool registered;
-    } 
+        
+        bytes32[] tokenIDs;
+        mapping (bytes32 => DoctorToken) tokens;
+    }
     
+    struct DoctorToken {
+        bool exists;
+        address oracleAddress;
+        
+        // TODO: maybe here we should have info about the file
+    }
+
     struct Oracle {
         bool registered;
         
-        uint averageContractRating;
-        uint contractRatingCount;
+        uint16 averageContractRating;
+        uint16 contractRatingCount;
         
-        uint averageDoctorRating;
-        uint doctorRatingCount;
+        uint16 averageDoctorRating;
+        uint16 doctorRatingCount;
         
         bytes32[] tokenIDs;
         mapping (bytes32 => OracleToken) tokens;
@@ -51,11 +61,5 @@ library Shared {
         // TODO: maybe here we should have info about the file
     }
     
-    
-    // Functions
-    // function checkPublicKey(bytes memory _publicKey) public returns (bool) {
-    //     // 2 ** 160 - 1 == 0x00FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-    //     return (uint(keccak256(_publicKey)) & (0x00FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)) == uint(msg.sender);
-    // }
     
 }

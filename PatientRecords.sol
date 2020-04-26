@@ -4,7 +4,6 @@ import "./Shared.sol";
 import "./Controller.sol";
 
 
-// TODO: replace uint with more specific type
 // TODO: make the events targeted if they are
 // TODO: make sure the records and the requests are available
 
@@ -61,9 +60,9 @@ contract PatientRecords {
     // TODO: penalize if oracle responded to PRSC but didn't send to doctor
     event recordRequestedDoctor();
     event recordRequestedPatient(bytes doctorPublicKey); // Inform doctor about successful request, and inform patient about new request (must contain doctor's public key)
-    function requestRecord(uint _recordIndex, bytes memory _publicKey, uint _minOracleCount, uint _maxOracleCount) public onlyDoctor {
+    function requestRecord(uint16 _recordIndex, bytes memory _publicKey, uint8 _minOracleCount, uint8 _maxOracleCount) public onlyDoctor {
         // require(Shared.checkPublicKey(_publicKey), "Valid public key required");
-        // require((uint(keccak256(_publicKey)) & (0x00FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)) == uint(msg.sender), "Valid public key required");
+        // require((uint256(keccak256(_publicKey)) & (0x00FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)) == uint256(msg.sender), "Valid public key required");
         require(_minOracleCount <= _maxOracleCount, "_minOracleCount <= _maxOracleCount required");
 
         Shared.Request memory request;
@@ -73,7 +72,7 @@ contract PatientRecords {
         request.maxOracleCount = _maxOracleCount;
         request.grant = false;
         request.oraclesEvaluated = false;
-        
+
         records[bundleHashes[_recordIndex]].requests[records[bundleHashes[_recordIndex]].requestCount] = request;
         records[bundleHashes[_recordIndex]].requestCount += 1;
         
@@ -86,7 +85,7 @@ contract PatientRecords {
     event requestRespondedDoctor();
     event requestRespondedPatient();
     event requestRespondedOracles(); // TODO: must include bundle hash and so and so
-    function respondRequest(uint _recordIndex, uint _requestIndex, bool _grant) public onlyPatient {
+    function respondRequest(uint16 _recordIndex, uint16 _requestIndex, bool _grant) public onlyPatient {
         records[bundleHashes[_recordIndex]].requests[_requestIndex].grant = _grant;
         
         emit requestRespondedDoctor();
@@ -98,50 +97,55 @@ contract PatientRecords {
             // call function after 2 hours
         }
     }
-    
-    
-    // // Add an participating oracle (dony by oracle)
-    // event oracleAdded();
-    // function addOracleParticipation(uint _recordIndex, uint _requestIndex) public onlyOracle {
-    //     require(records[_recordIndex].requests[_requestIndex].grant, "Granted request required");
-    //     require(records[_recordIndex].requests[_requestIndex].requestTime + 1 hours <= block.timestamp &&
-    //         records[_recordIndex].requests[_requestIndex].oracleResponsesCount > 0, "Request no longer accepts oracles");
-    //     Shared.OracleResponse storage oracleResponse;
-    //     oracleResponse.participationTime = block.timestamp;
-    //     oracleResponse.didRespond = false;
-    //     records[_recordIndex].requests[_requestIndex].oracleResponsesCount += 1;
-    //     records[_recordIndex].requests[_requestIndex].oracleResponses[msg.sender] = oracleResponse;
-    // }
-    
-    
+
+
     // Add oracle response (done by oracle)
     // TODO: to think about: what if patient revoked after oracle participated?
     // TODO: maybe let doctor select 1 hours
+    // TODO LATER: consider all oracles are bad
     // NOTE:
     /* 
-     * There are 3 cases:
+     * There are 3 cases to start evaluating oracles and stop accepting more oracle responses:
      * 1- still waiting for min: reach min then evaluate
      * 2- got min but not max: evaluate on timeout
      * 3- got max: evaluate
      */
-    function addOracleResponse(uint _recordIndex, uint _requestIndex, bytes32 _bundleHash) public onlyOracle {
+    function addOracleResponse(uint16 _recordIndex, uint16 _requestIndex, bytes32 _bundleHash) public onlyOracle {
         Shared.Record storage record = records[bundleHashes[_recordIndex]];
         Shared.Request storage request = record.requests[_requestIndex];
         
         require(request.grant, "Granted request required");
         require(!request.oraclesEvaluated, "Unevaluated request required");
         
+        uint16 latency = (uint16)(block.timestamp - request.requestTime);
+        
         if (request.oracleAddresses.length < request.minOracleCount ||
-        request.oracleAddresses.length >= request.minOracleCount &&
-        request.oracleAddresses.length < request.maxOracleCount &&
-        request.requestTime + 1 hours <= block.timestamp) {
-            uint latency = block.timestamp - request.requestTime;
-            uint isHashCorrect = _bundleHash == bundleHashes[_recordIndex] ? 1 : 0;  // TODO: this should not be bundle hash but rather ks_kPp#
+            (request.oracleAddresses.length >= request.minOracleCount &&
+            request.oracleAddresses.length < request.maxOracleCount &&
+            latency <= 1 hours)) {
+                
+            uint8 isHashCorrect = _bundleHash == bundleHashes[_recordIndex] ? 1 : 0;
+                
+            // TODO LATER: this should not be bundle hash but rather ks_kPp#
+            uint16 input_start = 1;
+            uint16 input_end = 3600;
+            uint16 output_start = 2**16 - 1;
+            uint16 output_end = 1;
 
             // TODO: make sure this is working correctly
-            uint oracleRating = 100 / (latency) * isHashCorrect;
+            uint16 oracleRating = isHashCorrect;
+            if (latency < 1)
+                oracleRating *= 2**16 - 1;
+                
+            else if (latency > 1 hours)
+                oracleRating *= 0;
+                
+            else
+                oracleRating *= output_start + ((output_end - output_start) / (input_end - input_start)) * (latency - input_start);
+
+            // TODO: shouldn't be in ledger, directly send to measure reputation
             request.oracleAddresses.push(msg.sender);
-            request.oracleRatings[msg.sender] = oracleRating; // TODO: shouldn't be in ledger, directly send to measure reputation
+            request.oracleRatings[msg.sender] = oracleRating;
             
         }
         
@@ -156,22 +160,22 @@ contract PatientRecords {
     
     
     event tokenCreatedDoctor(bytes32 tokenID, address oracleAddress); // oracle info
-    // event tokenCreatedOracle(bytes32 tokenID, address doctorAddress); // doctor info
-    function evaluateOracles(uint _recordIndex, uint _requestIndex) internal {
+    event tokenCreatedOracle(bytes32 tokenID, address doctorAddress); // doctor info
+    function evaluateOracles(uint16 _recordIndex, uint16 _requestIndex) internal {
         Shared.Record storage record = records[bundleHashes[_recordIndex]];
         Shared.Request storage request = record.requests[_requestIndex];
         
-        uint[] memory reputations = controller.getOracleReputations(request.oracleAddresses);
-        uint[] memory ratings = new uint[](request.oracleAddresses.length);
+        uint16[] memory reputations = controller.getOracleReputations(request.oracleAddresses);
+        uint16[] memory ratings = new uint16[](request.oracleAddresses.length);
         
         address bestOracleAddress;
-        uint bestOracleScore = 0;
+        uint64 bestOracleScore = 0;
         
-        for (uint i = 0; i < request.oracleAddresses.length; i++) {
-            uint oracleRating = request.oracleRatings[request.oracleAddresses[i]];
-            uint oracleReputation = reputations[i];
+        for (uint16 i = 0; i < request.oracleAddresses.length; i++) {
+            uint16 oracleRating = request.oracleRatings[request.oracleAddresses[i]];
+            uint16 oracleReputation = reputations[i];
             
-            uint oracleScore = oracleRating * (oracleReputation + 1)**2;
+            uint64 oracleScore = oracleRating * (oracleReputation + 1)**2;
             
             if (oracleScore >= bestOracleScore) {
                 bestOracleScore = oracleScore;
@@ -186,8 +190,9 @@ contract PatientRecords {
         bytes32 tokenID = keccak256(abi.encodePacked(request.doctor, bestOracleAddress, block.timestamp));
         
         emit tokenCreatedDoctor(tokenID, bestOracleAddress);
-        
-        // emit tokenCreatedDoctor(tokenID, request.doctor);
+        emit tokenCreatedOracle(tokenID, request.doctor);
+
+        controller.submitDoctorToken(request.doctor, tokenID, bestOracleAddress);
         controller.submitOracleToken(bestOracleAddress, tokenID, request.doctor);
         
     }
